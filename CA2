@@ -1,0 +1,204 @@
+import bcrypt
+import requests
+import csv
+import sys
+
+# Encrypting the password
+def hash_password(password):
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed_password
+
+# Validating Password
+def validate_password():
+    while True:
+        password = input("Enter the password: ")
+
+        if len(password) < 8:
+            print("Password should contain at least 8 characters.")
+            continue
+
+        special_str = "!@#$%^&*()-_=+[]{}|;:',.<>?/~`"
+        upper, lower, special, digit = False, False, False, False
+
+        for char in password:
+            if char.isupper():
+                upper = True
+            elif char.islower():
+                lower = True
+            elif char.isdigit():
+                digit = True
+            elif char in special_str:
+                special = True
+
+        if upper and lower and digit and special:
+            return password
+        else:
+            print("Password must contain one uppercase, one lowercase, one digit, and one special character.")
+
+# Validating Email
+def validate_email():
+    while True:
+        email = input("Enter your email: ")
+
+        if '@' not in email or '.' not in email.split('@')[1]:
+            print("Enter a valid email address (e.g., user@example.com).")
+            continue
+
+        return email
+
+# User Registration
+def register_user():
+    print("Registering a new account...")
+
+    username = input("Enter your name: ")
+    email = validate_email()
+
+    password = validate_password()
+    hashed_password = hash_password(password)
+
+    security_question = input("What is your favorite fruit? ")
+    hashed_security_answer = hash_password(security_question)
+
+    with open('regno.csv', 'a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([username, email, hashed_password.decode('utf-8'), hashed_security_answer.decode('utf-8')])
+
+    print("Account successfully created!")
+
+# User Authentication
+def authenticate_user(email, password):
+    with open('regno.csv', 'r') as file:
+        reader = csv.reader(file)
+        for row in reader:
+            if email == row[1]:
+                stored_password = row[2].encode('utf-8')
+                if bcrypt.checkpw(password.encode('utf-8'), stored_password):
+                    print(f"Welcome back, {row[0]}!")
+                    return True
+                else:
+                    print("Incorrect password.")
+                    return False
+        print("Email not found.")
+        return False
+
+# Sign In
+def sign_in():
+    attempts = 5
+    while attempts > 0:
+        if attempts == 1:
+            print("WARNING: This is your last attempt before being locked out.")
+
+        email = validate_email()
+        password = input("Enter your password: ")
+
+        if authenticate_user(email, password):
+            fetch_air_quality_data()
+            return
+        else:
+            attempts -= 1
+            print(f"You have {attempts} attempts remaining.")
+
+    print("Login failed. Please try again later.")
+    sys.exit()
+
+# Forgot Password
+def forgot_password():
+    email = validate_email()
+    email_found = False
+
+    with open("regno.csv", "r") as file:
+        reader = csv.reader(file)
+        data = list(reader)
+
+    with open("regno.csv", "w", newline="") as file:
+        writer = csv.writer(file)
+
+        for row in data:
+            if email == row[1]:
+                email_found = True
+                security_answer = input("What is your favorite fruit? ")
+
+                if bcrypt.checkpw(security_answer.encode('utf-8'), row[3].encode('utf-8')):
+                    print("Security question answered correctly.")
+                    new_password = validate_password()
+                    hashed_new_password = hash_password(new_password)
+                    writer.writerow([row[0], row[1], hashed_new_password.decode('utf-8'), row[3]])
+                    print("Password successfully updated.")
+                else:
+                    print("Incorrect answer to the security question.")
+                    writer.writerow(row)
+            else:
+                writer.writerow(row)
+
+    if not email_found:
+        print("Email not found in the system.")
+
+# Fetch Air Quality Data
+def fetch_air_quality_data():
+    api_key = "your_openweather_api_key"  # Replace with your OpenWeather API key
+    location = input("Enter the city or location: ")
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        weather_data = response.json()
+
+        lat = weather_data['coord']['lat']
+        lon = weather_data['coord']['lon']
+
+        aqi_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={api_key}"
+        aqi_response = requests.get(aqi_url)
+        aqi_response.raise_for_status()
+        aqi_data = aqi_response.json()
+
+        aqi = aqi_data['list'][0]['main']['aqi']
+        pollutants = aqi_data['list'][0]['components']
+
+        print(f"Air Quality Index (AQI) for {location}: {aqi}")
+        print("Main Pollutants:")
+        print(f"PM2.5: {pollutants.get('pm2_5', 'N/A')} µg/m³")
+        print(f"PM10: {pollutants.get('pm10', 'N/A')} µg/m³")
+        print(f"Ozone (O3): {pollutants.get('o3', 'N/A')} µg/m³")
+
+        if aqi == 1:
+            print("Air quality is good. No precautions needed.")
+        elif aqi == 2:
+            print("Air quality is moderate. People with sensitivities should limit outdoor activities.")
+        elif aqi == 3:
+            print("Air quality is unhealthy for sensitive groups. Consider wearing a mask outside.")
+        elif aqi == 4:
+            print("Air quality is unhealthy. It's better to avoid outdoor activities.")
+        elif aqi == 5:
+            print("Air quality is very unhealthy. Stay indoors and wear a mask if necessary.")
+
+    except requests.exceptions.HTTPError as err:
+        print(f"HTTP error occurred: {err}")
+    except Exception as err:
+        print(f"An error occurred: {err}")
+
+# Main Menu
+def main_menu():
+    while True:
+        print("\n1. Register")
+        print("2. Sign In")
+        print("3. Forgot Password")
+        print("4. Exit")
+
+        choice = input("Enter your choice: ")
+
+        if choice == "1":
+            register_user()
+        elif choice == "2":
+            sign_in()
+        elif choice == "3":
+            forgot_password()
+        elif choice == "4":
+            print("Thank you for using our system. Goodbye!")
+            break
+        else:
+            print("Please enter a valid option.")
+
+if __name__ == "__main__":
+    main_menu()
